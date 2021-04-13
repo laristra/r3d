@@ -41,11 +41,11 @@
 		v.z /= (tmplen + 1.0e-299);				\
 	}
 
-void r3d_clip(r3d_poly *poly, r3d_plane *planes, r3d_int nplanes) {
+int r3d_clip(r3d_poly *poly, r3d_plane *planes, r3d_int nplanes) {
 	// direct access to vertex buffer
 	r3d_vertex *vertbuffer = poly->verts;
 	r3d_int *nverts = &poly->nverts;
-	if (*nverts <= 0) return;
+	if (*nverts <= 0) return 0;
 
 	// variable declarations
 	r3d_int v, p, np, onv, vcur, vnext, vstart, pnext, numunclipped;
@@ -75,7 +75,7 @@ void r3d_clip(r3d_poly *poly, r3d_plane *planes, r3d_int nplanes) {
 		if (smin >= 0.0) continue;
 		if (smax <= 0.0) {
 			*nverts = 0;
-			return;
+			return 1;
 		}
 
 		// check all edges and insert new vertices on the bisected edges
@@ -84,6 +84,12 @@ void r3d_clip(r3d_poly *poly, r3d_plane *planes, r3d_int nplanes) {
 			for (np = 0; np < 3; ++np) {
 				vnext = vertbuffer[vcur].pnbrs[np];
 				if (!clipped[vnext]) continue;
+                                if (*nverts == R3D_MAX_VERTS) {
+#if !defined(NDEBUG)                                  
+                                  fprintf(stderr, "r3d_clip: Max vertex buffer size exceeded; Increase R3D_MAX_VERTS");
+#endif
+                                  return 0;
+                                }
 				vertbuffer[*nverts].pnbrs[0] = vcur;
 				vertbuffer[vcur].pnbrs[np] = *nverts;
 				wav(vertbuffer[vcur].pos, -sdists[vnext], vertbuffer[vnext].pos,
@@ -122,9 +128,11 @@ void r3d_clip(r3d_poly *poly, r3d_plane *planes, r3d_int nplanes) {
 			for (np = 0; np < 3; ++np)
 				vertbuffer[v].pnbrs[np] = clipped[vertbuffer[v].pnbrs[np]];
 	}
+
+        return 1;
 }
 
-void r3d_split(r3d_poly *inpolys, r3d_int npolys, r3d_plane plane,
+int r3d_split(r3d_poly *inpolys, r3d_int npolys, r3d_plane plane,
 							 r3d_poly *out_pos, r3d_poly *out_neg) {
 	// direct access to vertex buffer
 	r3d_int v, np, npnxt, onv, vcur, vnext, vstart, pnext, nright, cside, p;
@@ -178,10 +186,22 @@ void r3d_split(r3d_poly *inpolys, r3d_int npolys, r3d_plane plane,
 				if (!side[vnext]) continue;
 				wav(vertbuffer[vcur].pos, -sdists[vnext], vertbuffer[vnext].pos,
 						sdists[vcur], newpos);
+                                if (*nverts == R3D_MAX_VERTS) {
+#if !defined(NDEBUG)                                  
+                                  fprintf(stderr, "r3d_split: Max vertex buffer size exceeded; Increase R3D_MAX_VERTS");
+#endif                                  
+                                  return 0;
+                                }
 				vertbuffer[*nverts].pos = newpos;
 				vertbuffer[*nverts].pnbrs[0] = vcur;
 				vertbuffer[vcur].pnbrs[np] = *nverts;
 				(*nverts)++;
+                                if (*nverts == R3D_MAX_VERTS) {
+#if !defined(NDEBUG)                                  
+                                  fprintf(stderr, "r3d_split: Max vertex buffer size exceeded; Increase R3D_MAX_VERTS");
+#endif                                  
+                                  return 0;
+                                }
 				vertbuffer[*nverts].pos = newpos;
 				side[*nverts] = 1;
 				vertbuffer[*nverts].pnbrs[0] = vnext;
@@ -226,6 +246,8 @@ void r3d_split(r3d_poly *inpolys, r3d_int npolys, r3d_plane plane,
 			for (np = 0; np < 3; ++np)
 				outpolys[1]->verts[v].pnbrs[np] = side[outpolys[1]->verts[v].pnbrs[np]];
 	}
+
+        return 1;
 }
 
 void r3d_reduce(r3d_poly *poly, r3d_real *moments, r3d_int polyorder) {
@@ -700,16 +722,23 @@ void r3d_init_box(r3d_poly *poly, r3d_rvec3 rbounds[2]) {
 	vertbuffer[7].pos.z = rbounds[1].z;
 }
 
-void r3d_init_poly(r3d_poly *poly, r3d_rvec3 *vertices, r3d_int numverts,
+int r3d_init_poly(r3d_poly *poly, r3d_rvec3 *vertices, r3d_int numverts,
 									 r3d_int **faceinds, r3d_int *numvertsperface,
 									 r3d_int numfaces) {
 	// dummy vars
 	r3d_int v, vprev, vcur, vnext, f, np;
 
+        if (numverts > R3D_MAX_VERTS) {
+#if !defined(NDEBUG)
+          fprintf(stderr, "r3d_init_poly: Max vertex buffer size exceeded; Increase R3D_MAX_VERTS");
+#endif
+          return 0;
+        }
+        
 	// direct access to vertex buffer
 	r3d_vertex *vertbuffer = poly->verts;
-	r3d_int *nverts = &poly->nverts;
-
+	r3d_int *nverts = &poly->nverts;        
+        
 	// count up the number of faces per vertex and act accordingly
 	r3d_int eperv[R3D_MAX_VERTS];
 	r3d_int minvperf = R3D_MAX_VERTS;
@@ -726,7 +755,7 @@ void r3d_init_poly(r3d_poly *poly, r3d_rvec3 *vertices, r3d_int numverts,
 	*nverts = 0;
 
 	// return if we were given an invalid poly
-	if (minvperf < 3) return;
+	if (minvperf < 3) return 0;
 
 	if (maxvperf == 3) {
 		// simple case with no need for duplicate vertices
@@ -779,6 +808,13 @@ void r3d_init_poly(r3d_poly *poly, r3d_rvec3 *vertices, r3d_int numverts,
 		// locations
 		*nverts = 0;
 		for (v = 0; v < numverts; ++v) {
+                        if ((*nverts) + eperv[v] > R3D_MAX_VERTS) {
+#if !defined(NDEBUG)
+                          fprintf(stderr, "r3d_init_poly: Max vertex buffer size exceeded; Increase R3D_MAX_VERTS");
+#endif
+                          return 0;
+                        }
+        
 			vstart[v] = *nverts;
 			for (vcur = 0; vcur < eperv[v]; ++vcur) {
 				vbtmp[*nverts].pos = vertices[v];
@@ -865,6 +901,8 @@ void r3d_init_poly(r3d_poly *poly, r3d_rvec3 *vertices, r3d_int numverts,
 			for (np = 0; np < 3; ++np)
 				vertbuffer[v].pnbrs[np] = util[vertbuffer[v].pnbrs[np]];
 	}
+
+        return 1;
 }
 
 void r3d_tet_faces_from_verts(r3d_plane *faces, r3d_rvec3 *verts) {
@@ -1024,8 +1062,8 @@ void r3d_init_brep(r3d_poly *poly, r3d_brep **brep, r3d_int *numcomponents) {
 	r3d_vertex *vertbuffer = poly->verts;
 
 	// locals
-	r3d_int nc = 0, i, np, nv, nf, vstart, vcur, vnext, pedge, nvkept,
-					numvertsincomponent, j;
+	r3d_int nc = 0, ncmax = 0, i, np, nv, nf, vstart, vcur, vnext, pedge, nvkept,
+            numvertsincomponent, j;
 
 	// make the mapping of equivalent vertex indices
 	r3d_int vertex_map[nverts];
@@ -1057,7 +1095,11 @@ void r3d_init_brep(r3d_poly *poly, r3d_brep **brep, r3d_int *numcomponents) {
 	r3d_int component_map[R3D_MAX_VERTS];
 	r3d_int numvertsperface[R3D_MAX_VERTS];
 	r3d_int *faceinds[R3D_MAX_VERTS];
-	r3d_brep *breptmp[R3D_MAX_VERTS];	// could be made smaller
+	r3d_brep *breptmp;
+
+        // Lets start with the assumption there will be 2 components
+        ncmax = 2;
+        breptmp = (r3d_brep *) malloc(ncmax*sizeof(r3d_brep));
 
 	// start at the first vertex
 	vstart = 0;
@@ -1174,7 +1216,12 @@ void r3d_init_brep(r3d_poly *poly, r3d_brep **brep, r3d_int *numcomponents) {
 		// 3 times. This means we have finished walking a connected component.
 
 		// create a new brep for packing the component
-		r3d_brep *pbrep = (r3d_brep *)malloc(sizeof(r3d_brep));
+                if (nc == ncmax) {
+                  ncmax *= 2;
+                  breptmp = (r3d_brep *) realloc(breptmp, ncmax*sizeof(r3d_brep));
+                }
+                
+		r3d_brep *pbrep = &(breptmp[nc]);
 
 		// set the number of vertices in the component
 		pbrep->numvertices = numvertsincomponent;
@@ -1223,8 +1270,6 @@ void r3d_init_brep(r3d_poly *poly, r3d_brep **brep, r3d_int *numcomponents) {
 			}
 		}
 
-		// copy the brep into the working array
-		breptmp[nc] = pbrep;
 
 		// increment the number of components (this now becomes the current count)
 		nc++;
@@ -1247,10 +1292,8 @@ void r3d_init_brep(r3d_poly *poly, r3d_brep **brep, r3d_int *numcomponents) {
 	// at this point, all components have been walked, so we just need to pack up
 	// the brep's from the working array
 	*numcomponents = nc;
-	*brep = (r3d_brep *)malloc(nc * sizeof(r3d_brep));
-	for (i = 0; i < nc; ++i) {
-		brep[i] = breptmp[i];
-	}
+	*brep = breptmp;
+
 }
 
 void r3d_print_brep(r3d_brep **brep, r3d_int numcomponents) {
@@ -1261,18 +1304,18 @@ void r3d_print_brep(r3d_brep **brep, r3d_int numcomponents) {
 	for (c = 0; c < numcomponents; ++c) {
 		printf("\ncomponent %d:\n\n", c);
 
-		printf("	component %d has %d vertices\n", c, brep[c]->numvertices);
-		for (v = 0; v < brep[c]->numvertices; ++v) {
+		printf("	component %d has %d vertices\n", c, (*brep)[c].numvertices);
+		for (v = 0; v < (*brep)[c].numvertices; ++v) {
 			printf("		vertex %2d: pos = ( % .10e , % .10e , % .10e )\n", v,
-						 brep[c]->vertices[v].x, brep[c]->vertices[v].y,
-						 brep[c]->vertices[v].z);
+                                                (*brep)[c].vertices[v].x, (*brep)[c].vertices[v].y,
+                                                (*brep)[c].vertices[v].z);
 		}
 
-		printf("\n\n	component %d has %d faces\n", c, brep[c]->numfaces);
-		for (f = 0; f < brep[c]->numfaces; ++f) {
-			printf("		face %2d had %d vertices: ", f, brep[c]->numvertsperface[f]);
-			for (v = 0; v < brep[c]->numvertsperface[f]; ++v) {
-				printf(" %d", brep[c]->faceinds[f][v]);
+		printf("\n\n	component %d has %d faces\n", c, (*brep)[c].numfaces);
+		for (f = 0; f < (*brep)[c].numfaces; ++f) {
+                  printf("		      face %2d had %d vertices: ", f, (*brep)[c].numvertsperface[f]);
+                  for (v = 0; v < (*brep)[c].numvertsperface[f]; ++v) {
+                              printf(" %d", (*brep)[c].faceinds[f][v]);
 			}
 			printf("\n");
 		}
@@ -1285,21 +1328,21 @@ void r3d_free_brep(r3d_brep **brep, r3d_int numcomponents) {
 	// loop over components
 	for (c = 0; c < numcomponents; ++c) {
 		// free the vertices
-		free(brep[c]->vertices);
+                free((*brep)[c].vertices);
 
 		// loop over faces
-		for (f = 0; f < brep[c]->numfaces; ++f) {
+		for (f = 0; f < (*brep)[c].numfaces; ++f) {
 			// free the component faceind arrays
-			free(brep[c]->faceinds[f]);
+                        free((*brep)[c].faceinds[f]);
 		}
 
 		// free the top level facinds array
-		free(brep[c]->faceinds);
+		free((*brep)[c].faceinds);
 
 		// free the numvertsperface array
-		free(brep[c]->numvertsperface);
+		free((*brep)[c].numvertsperface);
 	}
 
-	// freep the top level array of breps
+	// free the top level array of breps
 	free(*brep);
 }
